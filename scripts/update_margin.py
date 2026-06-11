@@ -36,6 +36,25 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 DATE_RE = re.compile(r"(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})")
 NUM_RE  = re.compile(r"-?\d+(?:\.\d+)?")
 
+# ログで判明した命名規則（/_data/_nfsWEB/min|DAY|ajaxindex|HS_DATA_DAY/...）から、
+# 信用残(sinyou)データの在りかを総当たりで試す候補。妥当性チェックで誤検出は弾く。
+CANDIDATE_DATA_URLS = [
+    "https://nikkei225jp.com/_data/_nfsWEB/min/sinyou.js",
+    "https://nikkei225jp.com/_data/_nfsWEB/min/sinyou_min.js",
+    "https://nikkei225jp.com/_data/_nfsWEB/min/NK225_sinyou.js",
+    "https://nikkei225jp.com/_data/_nfsWEB/min/NK225_sinyou_min.js",
+    "https://nikkei225jp.com/_data/_nfsWEB/min/sinyo.js",
+    "https://nikkei225jp.com/_data/_nfsWEB/ajaxindex/ajax_sinyou_min.js",
+    "https://nikkei225jp.com/_data/_nfsWEB/DAY/sinyou.json",
+    "https://nikkei225jp.com/_data/_nfsWEB/DAY/sinyou2.json",
+    "https://nikkei225jp.com/_data/_nfsWEB/DAY/sinyouweek.json",
+    "https://nikkei225jp.com/_data/_nfsWEB/HS_DATA_DAY/sinyou.json",
+    "https://nikkei225jp.com/_data/_nfsWEB/sinyou.json",
+    "https://nikkei225jp.com/_data/_nfsWEB/sinyou.js",
+    "https://nikkei225jp.com/_data/sinyou.json",
+    "https://nikkei225jp.com/_data/sinyou.js",
+]
+
 
 def load_data():
     with open(DATA_FILE, encoding="utf-8") as f:
@@ -194,6 +213,21 @@ def get_latest_from_source():
         row = normalize(d, nums)
         print(f"[i] page-table latest: {d} -> {json.dumps(row, ensure_ascii=False)}")
         return row
+
+    # A2) 命名規則からの候補を総当たり
+    for u in CANDIDATE_DATA_URLS:
+        try:
+            text = http_get(u)
+        except Exception:
+            continue
+        rows = rows_from_blob(text)
+        if rows:
+            d, nums = rows[-1]
+            row = normalize(d, nums)
+            print(f"[i] candidate hit: {u}")
+            print(f"[i] latest: {d} -> {json.dumps(row, ensure_ascii=False)}")
+            print(f"[i] 次回から高速化するには Secrets MARGIN_DATA_URL に上記URLを設定可")
+            return row
 
     # B) 参照スクリプトを巡回
     candidates = find_script_urls(html, PAGE_URL)
