@@ -46,6 +46,14 @@
   .tab:hover{color:var(--text)}
   .tab.on{color:var(--accent);border-bottom-color:var(--accent)}
 
+  /* range buttons */
+  .ranges{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:-2px 0 14px}
+  .ranges .rlbl{font-family:var(--jp);font-size:11px;color:var(--mute);margin-right:4px;letter-spacing:.08em}
+  .rbtn{font-family:var(--mono);font-size:11.5px;font-weight:500;color:var(--dim);background:var(--panel);
+        border:1px solid var(--line);border-radius:7px;padding:5px 11px;cursor:pointer;transition:all .15s}
+  .rbtn:hover{color:var(--text);border-color:#2c3a4e}
+  .rbtn.on{color:var(--ink);background:var(--accent);border-color:var(--accent);font-weight:600}
+
   .card{background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--line);
         border-radius:16px;padding:14px 14px 10px;position:relative;box-shadow:0 20px 50px -24px rgba(0,0,0,.7)}
   .pane{display:none}
@@ -114,6 +122,17 @@
     <button class="tab on" data-t="table">信用残テーブル</button>
     <button class="tab" data-t="rate">日経平均 × 信用評価損益率</button>
     <button class="tab" data-t="ratio">日経平均 × 信用倍率</button>
+  </div>
+
+  <div class="ranges" id="ranges">
+    <span class="rlbl">期間</span>
+    <button class="rbtn" data-m="6">6M</button>
+    <button class="rbtn" data-m="12">1Y</button>
+    <button class="rbtn" data-m="24">2Y</button>
+    <button class="rbtn" data-m="36">3Y</button>
+    <button class="rbtn" data-m="60">5Y</button>
+    <button class="rbtn" data-m="84">7Y</button>
+    <button class="rbtn on" data-m="all">全部</button>
   </div>
 
   <div class="card">
@@ -758,6 +777,8 @@ const CREDIT = [
 /* 日経平均（週足終値）: サイト上のプロキシ経由で Yahoo Finance（^N225）から取得。{日付: 終値} */
 const PROXY = "https://moo-stock-blog.com/stock-proxy.php?url=";
 let NIKKEI = null; // 取得後に {"2025-07-18":NNNNN,...} が入る
+let RANGE_MONTHS = null;   // 表示期間（月）。null = 全部
+let VIEW = CREDIT;          // テーブル/チャートが見る配列（CREDIT の部分集合）
 
 const NS='http://www.w3.org/2000/svg';
 const el=(t,a)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e;};
@@ -797,7 +818,7 @@ function renderTable(){
     <th>買い残 変化<span class="u">金額%</span></th>
   </tr></thead>`;
   const pc=v=>v>=0?'pos':'neg';
-  const rows=CREDIT.slice().reverse().map((x,i)=>{
+  const rows=VIEW.slice().reverse().map((x,i)=>{
     const warn = x.e>-2.5 ? ' warn':'';      // 天井圏(0%寄り)を淡赤で警告
     const latest = i===0 ? ' class="latest"':'';
     const nkv = (NIKKEI && NIKKEI[x.d]!=null) ? fmt(Math.round(NIKKEI[x.d])) : '—';
@@ -824,9 +845,9 @@ function makeChart(svgId, tipId, right){
   const svg=document.getElementById(svgId), tip=document.getElementById(tipId);
   const chart=svg.parentElement;
   const M={l:46,r:48}, TOP={y:26,h:300}, AXB=30, H=TOP.y+TOP.h+AXB;
-  const n=CREDIT.length;
 
   function draw(){
+    const D=VIEW, n=D.length;
     const W=chart.clientWidth||700;
     svg.setAttribute('viewBox',`0 0 ${W} ${H}`); svg.setAttribute('width',W); svg.setAttribute('height',H);
     svg.innerHTML='';
@@ -834,7 +855,7 @@ function makeChart(svgId, tipId, right){
     const x=i=> M.l+(n<=1?0:i/(n-1))*iw;
 
     // 右軸スケール（信用指標）
-    const rv=CREDIT.map(d=>d[right.key]);
+    const rv=D.map(d=>d[right.key]);
     let rLo=Math.min(...rv), rHi=Math.max(...rv);
     if(right.thresholds) right.thresholds.forEach(t=>{rLo=Math.min(rLo,t.v);rHi=Math.max(rHi,t.v);});
     const rpad=(rHi-rLo)*(right.pad||0.12)||1; rLo-=rpad; rHi+=rpad;
@@ -843,7 +864,7 @@ function makeChart(svgId, tipId, right){
     // 左軸スケール（日経平均）
     let nk=null, pLo=0,pHi=1,yP=null;
     if(NIKKEI){
-      const cs=CREDIT.map(d=>NIKKEI[d.d]).filter(v=>v!=null);
+      const cs=D.map(d=>NIKKEI[d.d]).filter(v=>v!=null);
       if(cs.length){ pLo=Math.min(...cs); pHi=Math.max(...cs); const pp=(pHi-pLo)*0.1||100; pLo-=pp; pHi+=pp;
         yP=v=> TOP.y+(pHi-v)/(pHi-pLo)*TOP.h; nk=true; }
     }
@@ -855,14 +876,12 @@ function makeChart(svgId, tipId, right){
       svg.appendChild(el('line',{class:'gridline',x1:M.l,y1:yR(v),x2:M.l+iw,y2:yR(v)}));
       svg.appendChild(txt('axislbl',M.l+iw+6,yR(v)+3,right.fmt(v)));
     }
-    // 左軸目盛（日経）
     if(nk){
       for(let k=0;k<=ticks;k++){
         const v=pLo+(pHi-pLo)*k/ticks;
         svg.appendChild(txt('axislbl pr',M.l-6,yP(v)+3,Math.round(v/1000)+'k')).setAttribute('text-anchor','end');
       }
     }
-    // 目安線（評価損益率の 0% / -20% など）
     if(right.thresholds) right.thresholds.forEach(t=>{
       svg.appendChild(el('line',{class:'thresh',x1:M.l,y1:yR(t.v),x2:M.l+iw,y2:yR(t.v)}));
       svg.appendChild(txt('threshlbl',M.l+3,yR(t.v)-4,t.label));
@@ -870,15 +889,15 @@ function makeChart(svgId, tipId, right){
 
     // 日経ライン
     if(nk){
-      let pp='';CREDIT.forEach((d,i)=>{const v=NIKKEI[d.d]; if(v!=null) pp+=(pp?'L':'M')+x(i).toFixed(1)+','+yP(v).toFixed(1)+' ';});
+      let pp='';D.forEach((d,i)=>{const v=NIKKEI[d.d]; if(v!=null) pp+=(pp?'L':'M')+x(i).toFixed(1)+','+yP(v).toFixed(1)+' ';});
       const defs=el('defs',{});
       const g=el('linearGradient',{id:svgId+'g',x1:0,y1:0,x2:0,y2:1});
       g.appendChild(el('stop',{offset:'0%','stop-color':'rgba(90,169,230,.16)'}));
       g.appendChild(el('stop',{offset:'100%','stop-color':'rgba(90,169,230,0)'}));
       defs.appendChild(g); svg.appendChild(defs);
-      const first=CREDIT.find(d=>NIKKEI[d.d]!=null), last=[...CREDIT].reverse().find(d=>NIKKEI[d.d]!=null);
+      const first=D.find(d=>NIKKEI[d.d]!=null), last=[...D].reverse().find(d=>NIKKEI[d.d]!=null);
       if(first&&last){
-        const area='M'+x(CREDIT.indexOf(first)).toFixed(1)+','+yP(pLo).toFixed(1)+' '+pp.replace('M','L')+'L'+x(CREDIT.indexOf(last)).toFixed(1)+','+yP(pLo).toFixed(1)+' Z';
+        const area='M'+x(D.indexOf(first)).toFixed(1)+','+yP(pLo).toFixed(1)+' '+pp.replace('M','L')+'L'+x(D.indexOf(last)).toFixed(1)+','+yP(pLo).toFixed(1)+' Z';
         svg.appendChild(el('path',{d:area,fill:'url(#'+svgId+'g)'}));
       }
       svg.appendChild(el('path',{class:'priceline',d:pp}));
@@ -887,19 +906,23 @@ function makeChart(svgId, tipId, right){
     }
 
     // 信用指標ライン
-    let rp='';CREDIT.forEach((d,i)=>{rp+=(i===0?'M':'L')+x(i).toFixed(1)+','+yR(d[right.key]).toFixed(1)+' ';});
+    let rp='';D.forEach((d,i)=>{rp+=(i===0?'M':'L')+x(i).toFixed(1)+','+yR(d[right.key]).toFixed(1)+' ';});
     svg.appendChild(el('path',{class:'rline',d:rp,stroke:right.color}));
 
-    // x軸（期間が長いときは年のみ、短いとき四半期も）
-    const showQ = n<=120;
-    CREDIT.forEach((d,i)=>{
+    // x軸（期間に応じて 月 / 四半期 / 年）
+    const showMonth=n<=40, showQ=n<=170;
+    D.forEach((d,i)=>{
       const [Y,Mo]=d.d.split('-');
-      const isYear=Mo==='01';
-      const isQ=(Mo==='04'||Mo==='07'||Mo==='10');
-      if(!(isYear||(showQ&&isQ)))return;
-      const prev=CREDIT[i-1]; if(prev&&prev.d.slice(0,7)===d.d.slice(0,7))return;
+      const isYear=Mo==='01', isQ=(Mo==='04'||Mo==='07'||Mo==='10');
+      let on=false;
+      if(showMonth) on=true;
+      else if(showQ) on=isYear||isQ;
+      else on=isYear;
+      if(!on)return;
+      const prev=D[i-1]; if(prev&&prev.d.slice(0,7)===d.d.slice(0,7))return;
       svg.appendChild(el('line',{x1:x(i),y1:TOP.y,x2:x(i),y2:TOP.y+TOP.h,stroke:isYear?'#222c3a':'#141a24','stroke-width':1}));
-      const t=txt('axislbl',x(i),H-10,isYear?Y:Y.slice(2)+'/'+(+Mo),'middle');
+      const lbl=isYear?Y:(showMonth?(+Mo)+'月':Y.slice(2)+'/'+(+Mo));
+      const t=txt('axislbl',x(i),H-10,lbl,'middle');
       if(isYear)t.setAttribute('fill','#aab4c4');
       svg.appendChild(t);
     });
@@ -917,7 +940,7 @@ function makeChart(svgId, tipId, right){
       const px=(ev.touches?ev.touches[0].clientX:ev.clientX)-rct.left;
       const sx=px*(W/rct.width);
       let i=Math.round((sx-M.l)/iw*(n-1)); i=Math.max(0,Math.min(n-1,i));
-      const d=CREDIT[i];
+      const d=D[i];
       guide.setAttribute('x1',x(i));guide.setAttribute('x2',x(i));guide.setAttribute('opacity',1);
       dotR.setAttribute('cx',x(i));dotR.setAttribute('cy',yR(d[right.key]));dotR.setAttribute('opacity',1);
       const nkv = nk?NIKKEI[d.d]:null;
@@ -962,6 +985,30 @@ function activate(t){
   if(t==='ratio'){drawRatio();drawn.ratio=true;}
 }
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>activate(b.dataset.t)));
+
+/* ───────── 期間フィルタ ───────── */
+function applyRange(months){
+  RANGE_MONTHS = months;
+  if(months==null){
+    VIEW = CREDIT;
+  }else{
+    const last = CREDIT.length ? CREDIT[CREDIT.length-1].d : null;
+    if(last){
+      const c = new Date(last+'T00:00:00Z'); c.setUTCMonth(c.getUTCMonth()-months);
+      const pad2=x=>String(x).padStart(2,'0');
+      const cutISO = c.getUTCFullYear()+'-'+pad2(c.getUTCMonth()+1)+'-'+pad2(c.getUTCDate());
+      VIEW = CREDIT.filter(x=>x.d>=cutISO);
+      if(VIEW.length<2) VIEW = CREDIT.slice(-2);
+    }else VIEW = CREDIT;
+  }
+  const key = months==null?'all':String(months);
+  document.querySelectorAll('.rbtn').forEach(b=>b.classList.toggle('on', b.dataset.m===key));
+  renderTable();
+  document.querySelectorAll('.tab').forEach(b=>{if(b.classList.contains('on'))activate(b.dataset.t);});
+}
+document.querySelectorAll('.rbtn').forEach(b=>b.addEventListener('click',()=>{
+  const m=b.dataset.m; applyRange(m==='all'?null:parseInt(m,10));
+}));
 
 let rt;window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{
   document.querySelectorAll('.tab').forEach(b=>{if(b.classList.contains('on'))activate(b.dataset.t);});
@@ -1011,7 +1058,7 @@ async function loadNikkei(){
     const r=await fetch('margin-data.json',{cache:'no-store'});
     if(r.ok){
       const j=await r.json();
-      if(Array.isArray(j)&&j.length){ CREDIT.splice(0,CREDIT.length,...j); renderStats(); renderTable(); }
+      if(Array.isArray(j)&&j.length){ CREDIT.splice(0,CREDIT.length,...j); renderStats(); applyRange(RANGE_MONTHS); }
     }
   }catch(e){ /* 単体表示時は埋め込みシードを使用 */ }
   loadNikkei();
