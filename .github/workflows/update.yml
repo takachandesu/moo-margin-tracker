@@ -1,0 +1,53 @@
+name: Margin Balance Weekly Update
+
+on:
+  schedule:
+    # 毎週水曜 23:00 UTC = 木曜 08:00 JST（信用評価損益率の公表後に取得）
+    - cron: '0 23 * * 3'
+  workflow_dispatch:
+    inputs:
+      manual_row:
+        description: '手動で1週分を追加する場合のJSON（空ならスクレイピング）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Update margin-data.json
+        env:
+          MANUAL_ROW: ${{ github.event.inputs.manual_row }}
+          MARGIN_DATA_URL: ${{ secrets.MARGIN_DATA_URL }}   # 任意: 発見済みデータURLを直指定で高速化
+        run: python scripts/update_margin.py
+
+      - name: Commit if changed
+        run: |
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git add public/margin-data.json
+          git diff --staged --quiet || git commit -m "data: weekly margin update"
+          git push || true
+
+      - name: Upload to Lolipop (FTP)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server:    ${{ secrets.LOLIPOP_FTP_HOST }}
+          username:  ${{ secrets.LOLIPOP_FTP_USER }}
+          password:  ${{ secrets.LOLIPOP_FTP_PASSWORD }}
+          local-dir: ./public/
+          server-dir: ${{ secrets.LOLIPOP_FTP_HEATMAP_PATH }}   # 例: /wp-content/uploads/heatmaps/
+          dangerous-clean-slate: false
+          state-name: .ftp-deploy-margin.json   # ★ 固有名（FTP衝突対策メモ準拠）
